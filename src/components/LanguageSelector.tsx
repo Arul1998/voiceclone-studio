@@ -46,8 +46,8 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         </button>
 
         {isOpen && (
-          <div className="absolute z-50 w-full mt-2 rounded-xl glass shadow-card overflow-hidden animate-scale-in">
-            <div className="max-h-64 overflow-y-auto no-scrollbar">
+          <div className="absolute z-[100] w-full mt-2 rounded-xl bg-card border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden animate-scale-in">
+            <div className="max-h-64 overflow-y-auto no-scrollbar bg-card">
               {availableLanguages.map((language) => (
                 <button
                   key={language.code}
@@ -56,10 +56,10 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
                     setIsOpen(false);
                   }}
                   className={cn(
-                    "w-full flex items-center justify-between p-4 transition-colors",
+                    "w-full flex items-center justify-between p-4 transition-colors bg-card",
                     selectedLanguage.code === language.code
                       ? "bg-primary/20"
-                      : "hover:bg-muted/50"
+                      : "hover:bg-muted"
                   )}
                 >
                   <div className="flex items-center gap-3">
