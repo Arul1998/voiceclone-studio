@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Play, Pause, Volume2, VolumeX, Download, RotateCcw, Check } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Download, RotateCcw, Check, Video, Music } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TranslationJob } from '@/types/video';
 import { cn } from '@/lib/utils';
@@ -79,20 +79,114 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, transl
     }
   };
 
-  const handleDownload = () => {
-    // In a real app, this would combine video + translated audio
-    // For now, we can download the translated audio
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleDownloadAudio = () => {
     if (translatedAudioUrl) {
       const link = document.createElement('a');
       link.href = translatedAudioUrl;
       link.download = `translated-audio-${job.targetLanguage.code}.mp3`;
       link.click();
-      toast.success('Translated audio downloaded!', {
-        description: 'The translated audio track has been saved.',
+      toast.success('Audio downloaded!');
+    }
+  };
+
+  const handleDownloadVideo = async () => {
+    if (!videoRef.current || !translatedAudioUrl) {
+      toast.error('Video or audio not available');
+      return;
+    }
+
+    setIsExporting(true);
+    toast.info('Preparing video...', { description: 'This may take a moment.' });
+
+    try {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext('2d')!;
+
+      // Create audio context to mix audio
+      const audioContext = new AudioContext();
+      const audioResponse = await fetch(translatedAudioUrl);
+      const audioArrayBuffer = await audioResponse.arrayBuffer();
+      const audioBuffer = await audioContext.decodeAudioData(audioArrayBuffer);
+
+      // Create media stream from canvas
+      const canvasStream = canvas.captureStream(30);
+      
+      // Create audio source and destination
+      const audioSource = audioContext.createBufferSource();
+      audioSource.buffer = audioBuffer;
+      const audioDestination = audioContext.createMediaStreamDestination();
+      audioSource.connect(audioDestination);
+      
+      // Combine video and audio streams
+      const combinedStream = new MediaStream([
+        ...canvasStream.getVideoTracks(),
+        ...audioDestination.stream.getAudioTracks(),
+      ]);
+
+      const mediaRecorder = new MediaRecorder(combinedStream, {
+        mimeType: 'video/webm;codecs=vp9,opus',
       });
-    } else {
-      toast.info('Download unavailable', {
-        description: 'The translated audio is not available for download.',
+
+      const chunks: Blob[] = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${job.originalVideo.name.replace(/\.[^/.]+$/, '')}-${job.targetLanguage.code}.webm`;
+        link.click();
+        URL.revokeObjectURL(url);
+        setIsExporting(false);
+        toast.success('Video downloaded!', {
+          description: 'Your translated video has been saved.',
+        });
+      };
+
+      // Start recording
+      mediaRecorder.start();
+      audioSource.start(0);
+
+      // Reset video to start
+      video.currentTime = 0;
+      video.muted = true;
+
+      // Draw frames
+      const drawFrame = () => {
+        if (video.ended || video.paused) {
+          mediaRecorder.stop();
+          audioSource.stop();
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(drawFrame);
+      };
+
+      video.play().then(() => {
+        drawFrame();
+        // Stop after video ends
+        video.onended = () => {
+          setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+              mediaRecorder.stop();
+              audioSource.stop();
+            }
+          }, 500);
+        };
+      });
+    } catch (error) {
+      console.error('Export error:', error);
+      setIsExporting(false);
+      toast.error('Export failed', {
+        description: 'Could not export video. Try downloading the audio instead.',
       });
     }
   };
@@ -193,22 +287,34 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, transl
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-3 mt-6">
+      <div className="flex flex-col gap-3 mt-6">
+        <div className="flex gap-3">
+          <Button
+            variant="gradient"
+            className="flex-1"
+            onClick={handleDownloadVideo}
+            disabled={isExporting || !translatedAudioUrl}
+          >
+            <Video className="w-5 h-5 mr-2" />
+            {isExporting ? 'Exporting...' : 'Download Video'}
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={handleDownloadAudio}
+            disabled={!translatedAudioUrl}
+          >
+            <Music className="w-5 h-5 mr-2" />
+            Download Audio
+          </Button>
+        </div>
         <Button
-          variant="outline"
-          className="flex-1"
+          variant="ghost"
+          className="w-full"
           onClick={onReset}
         >
           <RotateCcw className="w-5 h-5 mr-2" />
-          New Video
-        </Button>
-        <Button
-          variant="gradient"
-          className="flex-1"
-          onClick={handleDownload}
-        >
-          <Download className="w-5 h-5 mr-2" />
-          Save Audio
+          Translate Another Video
         </Button>
       </div>
     </div>

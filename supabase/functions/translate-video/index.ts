@@ -131,15 +131,53 @@ serve(async (req) => {
     
     console.log('Translation result:', translatedText);
 
-    // Step 3: Generate speech using ElevenLabs
+    // Step 3: Generate speech using ElevenLabs with voice cloning
     console.log('Step 3: Generating speech with ElevenLabs...');
     
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY is not configured');
     }
 
-    // Use a default voice - Sarah (EXAVITQu4vr4xnSDxMaL) is a good multilingual voice
-    const voiceId = 'EXAVITQu4vr4xnSDxMaL';
+    let voiceId = 'EXAVITQu4vr4xnSDxMaL'; // Default fallback voice (Sarah)
+    
+    // If voice cloning is enabled, create an instant voice clone
+    if (voiceCloning) {
+      console.log('Creating instant voice clone from original audio...');
+      try {
+        // Convert base64 audio to blob for voice cloning
+        const binaryString = atob(audioBase64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        
+        // Create FormData with the audio file
+        const formData = new FormData();
+        const audioBlob = new Blob([bytes], { type: 'audio/wav' });
+        formData.append('files', audioBlob, 'voice_sample.wav');
+        formData.append('name', `voice_clone_${Date.now()}`);
+        formData.append('description', 'Voice clone for video translation');
+        
+        const cloneResponse = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+          method: 'POST',
+          headers: {
+            'xi-api-key': ELEVENLABS_API_KEY,
+          },
+          body: formData,
+        });
+
+        if (cloneResponse.ok) {
+          const cloneData = await cloneResponse.json();
+          voiceId = cloneData.voice_id;
+          console.log('Voice clone created successfully, voice ID:', voiceId);
+        } else {
+          const errorText = await cloneResponse.text();
+          console.warn('Voice cloning failed, using default voice:', errorText);
+        }
+      } catch (cloneError) {
+        console.warn('Voice cloning error, using default voice:', cloneError);
+      }
+    }
     
     const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
