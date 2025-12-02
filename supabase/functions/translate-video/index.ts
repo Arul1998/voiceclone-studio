@@ -6,6 +6,37 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Language code mapping for ElevenLabs dubbing API
+const languageCodeMap: Record<string, string> = {
+  'Tamil': 'ta',
+  'Hindi': 'hi',
+  'Telugu': 'te',
+  'Kannada': 'kn',
+  'Malayalam': 'ml',
+  'Bengali': 'bn',
+  'Marathi': 'mr',
+  'Gujarati': 'gu',
+  'Punjabi': 'pa',
+  'Odia': 'or',
+  'Assamese': 'as',
+  'Urdu': 'ur',
+  'Sanskrit': 'sa',
+  'Konkani': 'kok',
+  'Nepali': 'ne',
+  'Sindhi': 'sd',
+  'English': 'en',
+  'Spanish': 'es',
+  'French': 'fr',
+  'German': 'de',
+  'Italian': 'it',
+  'Portuguese': 'pt',
+  'Russian': 'ru',
+  'Japanese': 'ja',
+  'Korean': 'ko',
+  'Chinese': 'zh',
+  'Arabic': 'ar',
+};
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -21,193 +52,116 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
 
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY is not configured');
-    }
-
-    console.log('Starting video translation process...');
-    console.log('Target language:', targetLanguage);
-    console.log('Voice cloning enabled:', voiceCloning);
-
-    // Step 1: Transcribe audio using Lovable AI (Gemini can process audio)
-    console.log('Step 1: Transcribing audio...');
-    
-    const transcriptionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are an expert audio transcriber. Listen to the audio and provide an accurate transcription. Also detect the language of the audio. Respond in JSON format: {"language": "detected language code (e.g., ta, en, es)", "languageName": "language name", "transcription": "the transcribed text"}'
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Please transcribe this audio and detect the language.'
-              },
-              {
-                type: 'input_audio',
-                input_audio: {
-                  data: audioBase64,
-                  format: 'wav'
-                }
-              }
-            ]
-          }
-        ],
-      }),
-    });
-
-    if (!transcriptionResponse.ok) {
-      const errorText = await transcriptionResponse.text();
-      console.error('Transcription error:', errorText);
-      throw new Error(`Transcription failed: ${errorText}`);
-    }
-
-    const transcriptionData = await transcriptionResponse.json();
-    const transcriptionText = transcriptionData.choices?.[0]?.message?.content || '';
-    
-    console.log('Transcription result:', transcriptionText);
-    
-    // Parse the JSON response
-    let transcriptionResult;
-    try {
-      // Extract JSON from the response (it might be wrapped in markdown code blocks)
-      const jsonMatch = transcriptionText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        transcriptionResult = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('Could not parse transcription result');
-      }
-    } catch (e) {
-      console.error('JSON parse error:', e);
-      // Fallback: treat the whole response as transcription
-      transcriptionResult = {
-        language: 'unknown',
-        languageName: 'Unknown',
-        transcription: transcriptionText
-      };
-    }
-
-    // Step 2: Translate the text
-    console.log('Step 2: Translating text to', targetLanguage);
-    
-    const translationResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert translator. Translate the following text to ${targetLanguage}. Maintain the tone, style, and meaning. Only respond with the translated text, nothing else.`
-          },
-          {
-            role: 'user',
-            content: transcriptionResult.transcription
-          }
-        ],
-      }),
-    });
-
-    if (!translationResponse.ok) {
-      const errorText = await translationResponse.text();
-      console.error('Translation error:', errorText);
-      throw new Error(`Translation failed: ${errorText}`);
-    }
-
-    const translationData = await translationResponse.json();
-    const translatedText = translationData.choices?.[0]?.message?.content || '';
-    
-    console.log('Translation result:', translatedText);
-
-    // Step 3: Generate speech using ElevenLabs with voice cloning
-    console.log('Step 3: Generating speech with ElevenLabs...');
-    
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY is not configured');
     }
 
-    let voiceId = 'EXAVITQu4vr4xnSDxMaL'; // Default fallback voice (Sarah)
-    
-    // If voice cloning is enabled, create an instant voice clone
-    if (voiceCloning) {
-      console.log('Creating instant voice clone from original audio...');
-      try {
-        // Convert base64 audio to blob for voice cloning
-        const binaryString = atob(audioBase64);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-        
-        // Create FormData with the audio file
-        const formData = new FormData();
-        const audioBlob = new Blob([bytes], { type: 'audio/wav' });
-        formData.append('files', audioBlob, 'voice_sample.wav');
-        formData.append('name', `voice_clone_${Date.now()}`);
-        formData.append('description', 'Voice clone for video translation');
-        
-        const cloneResponse = await fetch('https://api.elevenlabs.io/v1/voices/add', {
-          method: 'POST',
-          headers: {
-            'xi-api-key': ELEVENLABS_API_KEY,
-          },
-          body: formData,
-        });
+    console.log('Starting multi-speaker video translation...');
+    console.log('Target language:', targetLanguage);
+    console.log('Voice cloning enabled:', voiceCloning);
 
-        if (cloneResponse.ok) {
-          const cloneData = await cloneResponse.json();
-          voiceId = cloneData.voice_id;
-          console.log('Voice clone created successfully, voice ID:', voiceId);
-        } else {
-          const errorText = await cloneResponse.text();
-          console.warn('Voice cloning failed, using default voice:', errorText);
-        }
-      } catch (cloneError) {
-        console.warn('Voice cloning error, using default voice:', cloneError);
-      }
+    // Convert base64 audio to binary
+    const binaryString = atob(audioBase64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
+
+    const targetLangCode = languageCodeMap[targetLanguage] || 'en';
+    console.log('Target language code:', targetLangCode);
+
+    // Use ElevenLabs Dubbing API for multi-speaker voice cloning
+    console.log('Step 1: Creating dubbing project with ElevenLabs...');
     
-    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const formData = new FormData();
+    const audioBlob = new Blob([bytes], { type: 'audio/wav' });
+    formData.append('file', audioBlob, 'audio.wav');
+    formData.append('target_lang', targetLangCode);
+    formData.append('mode', 'automatic'); // Automatic speaker detection
+    formData.append('num_speakers', '0'); // Auto-detect number of speakers
+    formData.append('watermark', 'false');
+
+    const dubbingResponse = await fetch('https://api.elevenlabs.io/v1/dubbing', {
       method: 'POST',
       headers: {
-        'Accept': 'audio/mpeg',
-        'Content-Type': 'application/json',
         'xi-api-key': ELEVENLABS_API_KEY,
       },
-      body: JSON.stringify({
-        text: translatedText,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.5,
-          use_speaker_boost: true
-        }
-      }),
+      body: formData,
     });
 
-    if (!ttsResponse.ok) {
-      const errorText = await ttsResponse.text();
-      console.error('TTS error:', errorText);
-      throw new Error(`Text-to-speech failed: ${errorText}`);
+    if (!dubbingResponse.ok) {
+      const errorText = await dubbingResponse.text();
+      console.error('Dubbing creation error:', errorText);
+      throw new Error(`Dubbing creation failed: ${errorText}`);
     }
 
-    const audioArrayBuffer = await ttsResponse.arrayBuffer();
+    const dubbingData = await dubbingResponse.json();
+    const dubbingId = dubbingData.dubbing_id;
+    console.log('Dubbing project created, ID:', dubbingId);
+
+    // Step 2: Poll for dubbing completion
+    console.log('Step 2: Waiting for dubbing to complete...');
+    
+    let dubbingComplete = false;
+    let attempts = 0;
+    const maxAttempts = 60; // Max 5 minutes (5 seconds * 60)
+    let dubbingStatus: any = null;
+
+    while (!dubbingComplete && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
+      
+      const statusResponse = await fetch(`https://api.elevenlabs.io/v1/dubbing/${dubbingId}`, {
+        method: 'GET',
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+        },
+      });
+
+      if (!statusResponse.ok) {
+        const errorText = await statusResponse.text();
+        console.error('Status check error:', errorText);
+        throw new Error(`Status check failed: ${errorText}`);
+      }
+
+      dubbingStatus = await statusResponse.json();
+      console.log('Dubbing status:', dubbingStatus.status, `(attempt ${attempts + 1})`);
+
+      if (dubbingStatus.status === 'dubbed') {
+        dubbingComplete = true;
+      } else if (dubbingStatus.status === 'failed') {
+        throw new Error(`Dubbing failed: ${dubbingStatus.error || 'Unknown error'}`);
+      }
+      
+      attempts++;
+    }
+
+    if (!dubbingComplete) {
+      throw new Error('Dubbing timed out after 5 minutes');
+    }
+
+    // Step 3: Download the dubbed audio
+    console.log('Step 3: Downloading dubbed audio...');
+    
+    const audioDownloadResponse = await fetch(
+      `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/audio/${targetLangCode}`,
+      {
+        method: 'GET',
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+        },
+      }
+    );
+
+    if (!audioDownloadResponse.ok) {
+      const errorText = await audioDownloadResponse.text();
+      console.error('Audio download error:', errorText);
+      throw new Error(`Audio download failed: ${errorText}`);
+    }
+
+    const dubbedAudioBuffer = await audioDownloadResponse.arrayBuffer();
     
     // Convert to base64 in chunks to avoid stack overflow
-    const uint8Array = new Uint8Array(audioArrayBuffer);
+    const uint8Array = new Uint8Array(dubbedAudioBuffer);
     let binary = '';
     const chunkSize = 8192;
     for (let i = 0; i < uint8Array.length; i += chunkSize) {
@@ -216,19 +170,68 @@ serve(async (req) => {
     }
     const audioBase64Output = btoa(binary);
     
-    console.log('Speech generation complete. Audio size:', audioArrayBuffer.byteLength, 'bytes');
+    console.log('Multi-speaker dubbing complete. Audio size:', dubbedAudioBuffer.byteLength, 'bytes');
+    console.log('Detected speakers:', dubbingStatus.num_speakers || 'unknown');
+
+    // Get transcription info if available
+    let transcription = '';
+    let translation = '';
+    let sourceLanguage = { code: 'auto', name: 'Auto-detected' };
+
+    if (dubbingStatus.source_lang) {
+      sourceLanguage = {
+        code: dubbingStatus.source_lang,
+        name: dubbingStatus.source_lang
+      };
+    }
+
+    // Try to get transcript
+    try {
+      const transcriptResponse = await fetch(
+        `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/transcript/${dubbingStatus.source_lang || 'en'}`,
+        {
+          method: 'GET',
+          headers: {
+            'xi-api-key': ELEVENLABS_API_KEY,
+          },
+        }
+      );
+      if (transcriptResponse.ok) {
+        const transcriptData = await transcriptResponse.json();
+        transcription = transcriptData.transcript || '';
+      }
+    } catch (e) {
+      console.log('Could not fetch transcript:', e);
+    }
+
+    // Try to get translated transcript
+    try {
+      const translatedTranscriptResponse = await fetch(
+        `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/transcript/${targetLangCode}`,
+        {
+          method: 'GET',
+          headers: {
+            'xi-api-key': ELEVENLABS_API_KEY,
+          },
+        }
+      );
+      if (translatedTranscriptResponse.ok) {
+        const translatedData = await translatedTranscriptResponse.json();
+        translation = translatedData.transcript || '';
+      }
+    } catch (e) {
+      console.log('Could not fetch translated transcript:', e);
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
-        sourceLanguage: {
-          code: transcriptionResult.language,
-          name: transcriptionResult.languageName
-        },
-        transcription: transcriptionResult.transcription,
-        translation: translatedText,
+        sourceLanguage,
+        transcription: transcription || 'Multi-speaker audio processed',
+        translation: translation || `Dubbed to ${targetLanguage}`,
         audioBase64: audioBase64Output,
-        audioFormat: 'audio/mpeg'
+        audioFormat: 'audio/mpeg',
+        speakersDetected: dubbingStatus.num_speakers || 'multiple'
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
