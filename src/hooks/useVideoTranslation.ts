@@ -1,50 +1,26 @@
 import { useState, useCallback } from 'react';
 import { VideoFile, TranslationJob, Language, ProcessingStep } from '@/types/video';
 import { languages } from '@/data/languages';
+import { translateVideo, createAudioBlobUrl } from '@/services/translationService';
+import { toast } from '@/hooks/use-toast';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
-// Mock AI services - simulates backend processing
-const mockDetectLanguage = async (): Promise<Language> => {
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  // Randomly select a source language for demo
-  const sourceLanguages = ['en', 'es', 'fr', 'de'];
-  const randomCode = sourceLanguages[Math.floor(Math.random() * sourceLanguages.length)];
-  return languages.find(l => l.code === randomCode) || languages[0];
-};
-
-const mockTranscribe = async (): Promise<string> => {
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  return "This is a mock transcription of the video audio content.";
-};
-
-const mockTranslate = async (): Promise<string> => {
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  return "Esta es una transcripción simulada del contenido de audio del video.";
-};
-
-const mockCloneVoice = async (): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, 2500));
-};
-
-const mockSyncAudio = async (): Promise<string> => {
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  return "mock-translated-video-url";
-};
-
 export const useVideoTranslation = () => {
   const [selectedVideo, setSelectedVideo] = useState<VideoFile | null>(null);
-  const [targetLanguage, setTargetLanguage] = useState<Language>(languages[1]); // Spanish default
+  const [targetLanguage, setTargetLanguage] = useState<Language>(languages[0]); // English default
   const [voiceCloning, setVoiceCloning] = useState(true);
   const [job, setJob] = useState<TranslationJob | null>(null);
   const [processingSteps, setProcessingSteps] = useState<ProcessingStep[]>([]);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [translatedAudio, setTranslatedAudio] = useState<string | null>(null);
 
   const initializeSteps = (): ProcessingStep[] => [
+    { id: 'extract', label: 'Extracting audio', status: 'pending' },
+    { id: 'transcribe', label: 'Transcribing speech', status: 'pending' },
     { id: 'detect', label: 'Detecting language', status: 'pending' },
-    { id: 'transcribe', label: 'Transcribing audio', status: 'pending' },
     { id: 'translate', label: 'Translating content', status: 'pending' },
-    { id: 'clone', label: 'Cloning voice', status: 'pending' },
-    { id: 'sync', label: 'Syncing audio', status: 'pending' },
+    { id: 'synthesize', label: 'Generating voice', status: 'pending' },
   ];
 
   const updateStep = (stepId: string, status: ProcessingStep['status']) => {
@@ -55,6 +31,8 @@ export const useVideoTranslation = () => {
 
   const selectVideo = useCallback((file: File) => {
     const url = URL.createObjectURL(file);
+    setVideoFile(file);
+    
     const video: VideoFile = {
       id: generateId(),
       name: file.name,
@@ -75,12 +53,9 @@ export const useVideoTranslation = () => {
   }, []);
 
   const startTranslation = useCallback(async () => {
-    if (!selectedVideo) return;
+    if (!selectedVideo || !videoFile) return;
 
     const steps = initializeSteps();
-    if (!voiceCloning) {
-      steps.splice(3, 1); // Remove voice cloning step
-    }
     setProcessingSteps(steps);
 
     const newJob: TranslationJob = {
@@ -94,61 +69,105 @@ export const useVideoTranslation = () => {
     setJob(newJob);
 
     try {
-      // Step 1: Detect language
-      updateStep('detect', 'active');
-      const detectedLanguage = await mockDetectLanguage();
-      updateStep('detect', 'complete');
-      setJob(prev => prev ? { ...prev, sourceLanguage: detectedLanguage, progress: 20, status: 'transcribing' } : null);
-
+      // Step 1: Extract audio
+      updateStep('extract', 'active');
+      setJob(prev => prev ? { ...prev, progress: 10, status: 'detecting' } : null);
+      
+      // Small delay to show the step
+      await new Promise(resolve => setTimeout(resolve, 500));
+      updateStep('extract', 'complete');
+      
       // Step 2: Transcribe
       updateStep('transcribe', 'active');
-      await mockTranscribe();
-      updateStep('transcribe', 'complete');
-      setJob(prev => prev ? { ...prev, progress: 40, status: 'translating' } : null);
+      setJob(prev => prev ? { ...prev, progress: 20, status: 'transcribing' } : null);
 
-      // Step 3: Translate
-      updateStep('translate', 'active');
-      await mockTranslate();
-      updateStep('translate', 'complete');
-      setJob(prev => prev ? { ...prev, progress: 60, status: voiceCloning ? 'cloning' : 'syncing' } : null);
+      // Step 3-5 happen in the edge function
+      const result = await translateVideo(
+        videoFile,
+        targetLanguage,
+        voiceCloning,
+        (step, progress) => {
+          if (step === 'extracting') {
+            updateStep('transcribe', 'active');
+            setJob(prev => prev ? { ...prev, progress: 30 } : null);
+          } else if (step === 'processing') {
+            updateStep('transcribe', 'complete');
+            updateStep('detect', 'complete');
+            updateStep('translate', 'active');
+            setJob(prev => prev ? { ...prev, progress: 60, status: 'translating' } : null);
+          } else if (step === 'complete') {
+            updateStep('translate', 'complete');
+            updateStep('synthesize', 'complete');
+          }
+        }
+      );
 
-      // Step 4: Clone voice (if enabled)
-      if (voiceCloning) {
-        updateStep('clone', 'active');
-        await mockCloneVoice();
-        updateStep('clone', 'complete');
-        setJob(prev => prev ? { ...prev, progress: 80, status: 'syncing' } : null);
+      if (!result.success) {
+        throw new Error(result.error || 'Translation failed');
       }
 
-      // Step 5: Sync audio
-      updateStep('sync', 'active');
-      const translatedUrl = await mockSyncAudio();
-      updateStep('sync', 'complete');
-      
+      // Update steps to complete
+      updateStep('transcribe', 'complete');
+      updateStep('detect', 'complete');
+      updateStep('translate', 'complete');
+      updateStep('synthesize', 'complete');
+
+      // Store the translated audio
+      if (result.audioBase64) {
+        const audioUrl = createAudioBlobUrl(result.audioBase64, result.audioFormat);
+        setTranslatedAudio(audioUrl);
+      }
+
       setJob(prev => prev ? { 
         ...prev, 
         progress: 100, 
         status: 'complete',
-        translatedVideoUrl: selectedVideo.url // Using original for demo
+        sourceLanguage: result.sourceLanguage,
+        translatedVideoUrl: selectedVideo.url // Using original video with new audio overlay
       } : null);
 
+      toast({
+        title: "Translation Complete!",
+        description: `Translated from ${result.sourceLanguage?.name || 'detected language'} to ${targetLanguage.name}`,
+      });
+
     } catch (error) {
+      console.error('Translation error:', error);
+      
+      // Mark current step as error
+      setProcessingSteps(prev => 
+        prev.map(step => step.status === 'active' ? { ...step, status: 'error' } : step)
+      );
+      
+      const errorMessage = error instanceof Error ? error.message : 'Translation failed. Please try again.';
+      
       setJob(prev => prev ? { 
         ...prev, 
         status: 'error', 
-        error: 'Translation failed. Please try again.' 
+        error: errorMessage
       } : null);
+
+      toast({
+        title: "Translation Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     }
-  }, [selectedVideo, targetLanguage, voiceCloning]);
+  }, [selectedVideo, videoFile, targetLanguage, voiceCloning]);
 
   const reset = useCallback(() => {
     if (selectedVideo?.url) {
       URL.revokeObjectURL(selectedVideo.url);
     }
+    if (translatedAudio) {
+      URL.revokeObjectURL(translatedAudio);
+      setTranslatedAudio(null);
+    }
+    setVideoFile(null);
     setSelectedVideo(null);
     setJob(null);
     setProcessingSteps([]);
-  }, [selectedVideo]);
+  }, [selectedVideo, translatedAudio]);
 
   return {
     selectedVideo,
@@ -156,6 +175,7 @@ export const useVideoTranslation = () => {
     voiceCloning,
     job,
     processingSteps,
+    translatedAudio,
     selectVideo,
     setTargetLanguage,
     setVoiceCloning,

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Play, Pause, Volume2, VolumeX, Download, RotateCcw, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TranslationJob } from '@/types/video';
@@ -8,36 +8,62 @@ import { toast } from 'sonner';
 interface VideoPreviewProps {
   job: TranslationJob;
   onReset: () => void;
+  translatedAudioUrl?: string | null;
 }
 
-export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
+export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, translatedAudioUrl }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  // Sync audio with video
+  useEffect(() => {
+    if (videoRef.current && audioRef.current && translatedAudioUrl) {
+      // Mute the original video since we have translated audio
+      videoRef.current.muted = true;
+    }
+  }, [translatedAudioUrl]);
 
   const togglePlay = () => {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
+        audioRef.current?.pause();
       } else {
         videoRef.current.play();
+        if (audioRef.current && translatedAudioUrl) {
+          audioRef.current.currentTime = videoRef.current.currentTime;
+          audioRef.current.play();
+        }
       }
       setIsPlaying(!isPlaying);
     }
   };
 
   const toggleMute = () => {
-    if (videoRef.current) {
-      videoRef.current.muted = !isMuted;
-      setIsMuted(!isMuted);
+    if (audioRef.current) {
+      audioRef.current.muted = !isMuted;
     }
+    if (videoRef.current && !translatedAudioUrl) {
+      videoRef.current.muted = !isMuted;
+    }
+    setIsMuted(!isMuted);
   };
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
       const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
       setProgress(progress);
+      
+      // Keep audio in sync
+      if (audioRef.current && translatedAudioUrl) {
+        const diff = Math.abs(videoRef.current.currentTime - audioRef.current.currentTime);
+        if (diff > 0.3) {
+          audioRef.current.currentTime = videoRef.current.currentTime;
+        }
+      }
     }
   };
 
@@ -47,14 +73,28 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
       const x = e.clientX - rect.left;
       const percentage = x / rect.width;
       videoRef.current.currentTime = percentage * videoRef.current.duration;
+      if (audioRef.current && translatedAudioUrl) {
+        audioRef.current.currentTime = percentage * videoRef.current.duration;
+      }
     }
   };
 
   const handleDownload = () => {
-    // In a real app, this would download the translated video
-    toast.success('Video saved to device!', {
-      description: 'Your translated video has been downloaded.',
-    });
+    // In a real app, this would combine video + translated audio
+    // For now, we can download the translated audio
+    if (translatedAudioUrl) {
+      const link = document.createElement('a');
+      link.href = translatedAudioUrl;
+      link.download = `translated-audio-${job.targetLanguage.code}.mp3`;
+      link.click();
+      toast.success('Translated audio downloaded!', {
+        description: 'The translated audio track has been saved.',
+      });
+    } else {
+      toast.info('Download unavailable', {
+        description: 'The translated audio is not available for download.',
+      });
+    }
   };
 
   return (
@@ -67,6 +107,11 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
         <span className="text-lg font-semibold text-foreground">Translation Complete!</span>
       </div>
 
+      {/* Hidden audio element for translated audio */}
+      {translatedAudioUrl && (
+        <audio ref={audioRef} src={translatedAudioUrl} />
+      )}
+
       {/* Video player */}
       <div className="relative rounded-2xl overflow-hidden glass shadow-card">
         <video
@@ -74,7 +119,11 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
           src={job.translatedVideoUrl || job.originalVideo.url}
           className="w-full aspect-video object-cover"
           onTimeUpdate={handleTimeUpdate}
-          onEnded={() => setIsPlaying(false)}
+          onEnded={() => {
+            setIsPlaying(false);
+            audioRef.current?.pause();
+          }}
+          muted={!!translatedAudioUrl}
         />
         
         {/* Play overlay */}
@@ -135,6 +184,14 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
         </div>
       </div>
 
+      {/* Translation info */}
+      <div className="mt-4 p-4 rounded-xl glass">
+        <p className="text-sm text-muted-foreground mb-1">Translated from</p>
+        <p className="font-medium text-foreground">
+          {job.sourceLanguage?.flag} {job.sourceLanguage?.name || 'Auto-detected'} → {job.targetLanguage.flag} {job.targetLanguage.name}
+        </p>
+      </div>
+
       {/* Action buttons */}
       <div className="flex gap-3 mt-6">
         <Button
@@ -151,7 +208,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset }) => {
           onClick={handleDownload}
         >
           <Download className="w-5 h-5 mr-2" />
-          Save Video
+          Save Audio
         </Button>
       </div>
     </div>

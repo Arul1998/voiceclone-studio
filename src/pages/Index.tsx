@@ -16,6 +16,7 @@ const Index = () => {
     voiceCloning,
     job,
     processingSteps,
+    translatedAudio,
     selectVideo,
     setTargetLanguage,
     setVoiceCloning,
@@ -94,7 +95,7 @@ const Index = () => {
 
         {/* Preview screen */}
         {isComplete && job && (
-          <VideoPreview job={job} onReset={reset} />
+          <VideoPreview job={job} onReset={reset} translatedAudioUrl={translatedAudio} />
         )}
 
         {/* Error state */}
