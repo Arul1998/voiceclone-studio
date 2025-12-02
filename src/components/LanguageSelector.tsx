@@ -22,7 +22,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
     : languages;
 
   return (
-    <div className="animate-fade-in">
+    <div className={cn("animate-fade-in", isOpen && "relative z-[100]")}>
       <label className="block text-sm font-medium text-muted-foreground mb-3">
         Translate to
       </label>
@@ -46,8 +46,14 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         </button>
 
         {isOpen && (
-          <div className="absolute z-[100] w-full mt-2 rounded-xl bg-card border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden animate-scale-in">
-            <div className="max-h-64 overflow-y-auto no-scrollbar bg-card">
+          <>
+            {/* Backdrop to close dropdown */}
+            <div 
+              className="fixed inset-0 z-[99]" 
+              onClick={() => setIsOpen(false)}
+            />
+            <div className="absolute left-0 right-0 z-[100] w-full mt-2 rounded-xl bg-card border border-border shadow-[0_8px_32px_rgba(0,0,0,0.5)] overflow-hidden animate-scale-in">
+              <div className="max-h-64 overflow-y-auto no-scrollbar bg-card">
               {availableLanguages.map((language) => (
                 <button
                   key={language.code}
@@ -73,6 +79,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
               ))}
             </div>
           </div>
+          </>
         )}
       </div>
 
