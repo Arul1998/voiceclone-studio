@@ -43,13 +43,12 @@ serve(async (req) => {
   }
 
   try {
-    const { audioBase64, targetLanguage, voiceCloning } = await req.json();
+    const { videoBase64, mimeType, targetLanguage, voiceCloning } = await req.json();
     
-    if (!audioBase64) {
-      throw new Error('No audio data provided');
+    if (!videoBase64) {
+      throw new Error('No video data provided');
     }
 
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
     const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
 
     if (!ELEVENLABS_API_KEY) {
@@ -59,27 +58,41 @@ serve(async (req) => {
     console.log('Starting multi-speaker video translation...');
     console.log('Target language:', targetLanguage);
     console.log('Voice cloning enabled:', voiceCloning);
+    console.log('Video MIME type:', mimeType);
 
-    // Convert base64 audio to binary
-    const binaryString = atob(audioBase64);
+    // Convert base64 video to binary
+    const binaryString = atob(videoBase64);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
     }
+    
+    console.log('Video size:', bytes.length, 'bytes');
 
     const targetLangCode = languageCodeMap[targetLanguage] || 'en';
     console.log('Target language code:', targetLangCode);
 
-    // Use ElevenLabs Dubbing API for multi-speaker voice cloning
+    // Determine file extension from mime type
+    const extMap: Record<string, string> = {
+      'video/mp4': 'mp4',
+      'video/webm': 'webm',
+      'video/quicktime': 'mov',
+      'video/x-msvideo': 'avi',
+      'video/x-matroska': 'mkv',
+    };
+    const ext = extMap[mimeType] || 'mp4';
+
+    // Use ElevenLabs Dubbing API with original video for best sync
     console.log('Step 1: Creating dubbing project with ElevenLabs...');
     
     const formData = new FormData();
-    const audioBlob = new Blob([bytes], { type: 'audio/wav' });
-    formData.append('file', audioBlob, 'audio.wav');
+    const videoBlob = new Blob([bytes], { type: mimeType || 'video/mp4' });
+    formData.append('file', videoBlob, `video.${ext}`);
     formData.append('target_lang', targetLangCode);
     formData.append('mode', 'automatic'); // Automatic speaker detection
     formData.append('num_speakers', '0'); // Auto-detect number of speakers
     formData.append('watermark', 'false');
+    formData.append('highest_resolution', 'true'); // Better quality
 
     const dubbingResponse = await fetch('https://api.elevenlabs.io/v1/dubbing', {
       method: 'POST',
