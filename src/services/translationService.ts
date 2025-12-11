@@ -119,6 +119,21 @@ function writeString(view: DataView, offset: number, string: string) {
   }
 }
 
+// Convert file to base64
+const fileToBase64 = async (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove data URL prefix (e.g., "data:video/mp4;base64,")
+      const base64 = result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
 // Main translation function
 export const translateVideo = async (
   videoFile: File,
@@ -129,21 +144,17 @@ export const translateVideo = async (
   try {
     onProgress('extracting', 10);
     
-    // Extract audio as WAV
-    let audioBase64: string;
-    try {
-      audioBase64 = await extractAudioAsWav(videoFile);
-    } catch (e) {
-      console.warn('WAV extraction failed, trying raw extraction:', e);
-      audioBase64 = await extractAudioFromVideo(videoFile);
-    }
+    // Send the original video file directly for better sync and quality
+    const videoBase64 = await fileToBase64(videoFile);
+    const mimeType = videoFile.type || 'video/mp4';
     
     onProgress('processing', 30);
     
-    // Call the edge function
+    // Call the edge function with the full video
     const { data, error } = await supabase.functions.invoke('translate-video', {
       body: {
-        audioBase64,
+        videoBase64,
+        mimeType,
         targetLanguage: targetLanguage.name,
         voiceCloning
       }
