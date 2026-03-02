@@ -2,6 +2,8 @@ import { useState, useCallback } from 'react';
 import { VideoFile, TranslationJob, Language, ProcessingStep } from '@/types/video';
 import { languages } from '@/data/languages';
 import { translateVideo, createAudioBlobUrl } from '@/services/translationService';
+import { saveTranslation } from '@/services/historyService';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 
 const generateId = () => Math.random().toString(36).substring(2, 9);
@@ -107,9 +109,48 @@ export const useVideoTranslation = () => {
       ['upload', 'detect', 'translate', 'synthesize', 'download'].forEach(s => updateStep(s, 'complete'));
 
       // Store the translated audio
+      let audioBlobUrl: string | null = null;
+      let audioStorageUrl: string | null = null;
+
       if (result.audioBase64) {
-        const audioUrl = createAudioBlobUrl(result.audioBase64, result.audioFormat);
-        setTranslatedAudio(audioUrl);
+        audioBlobUrl = createAudioBlobUrl(result.audioBase64, result.audioFormat);
+        setTranslatedAudio(audioBlobUrl);
+
+        // Upload audio to storage for history
+        try {
+          const binary = atob(result.audioBase64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const audioBlob = new Blob([bytes], { type: result.audioFormat || 'audio/mpeg' });
+          const audioPath = `audio/${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
+          await supabase.storage.from('videos').upload(audioPath, audioBlob);
+          const { data: urlData } = supabase.storage.from('videos').getPublicUrl(audioPath);
+          audioStorageUrl = urlData.publicUrl;
+        } catch (e) {
+          console.warn('Failed to upload audio to storage:', e);
+        }
+      }
+
+      // Save to history
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await saveTranslation({
+            user_id: user.id,
+            source_language: result.sourceLanguage?.name || null,
+            target_language: targetLanguage.name,
+            video_name: selectedVideo.name,
+            video_size: selectedVideo.size,
+            video_duration: selectedVideo.duration,
+            speakers_detected: result.speakersDetected?.toString() || null,
+            transcription: result.transcription || null,
+            translation: result.translation || null,
+            audio_url: audioStorageUrl,
+            status: 'complete',
+          });
+        }
+      } catch (e) {
+        console.warn('Failed to save translation history:', e);
       }
 
       setJob(prev => prev ? { 
