@@ -23,6 +23,8 @@ export interface TranslationJob {
   translatedVideoUrl?: string;
   voiceCloning: boolean;
   error?: string;
+  transcription?: string;
+  translation?: string;
 }
 
 export type ProcessingStep = {

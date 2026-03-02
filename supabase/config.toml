@@ -31,3 +31,6 @@ enable_confirmations = false
 
 [functions.translate-video]
 verify_jwt = false
+
+[functions.youtube-download]
+verify_jwt = false

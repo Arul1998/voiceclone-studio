@@ -117,7 +117,9 @@ export const useVideoTranslation = () => {
         progress: 100, 
         status: 'complete',
         sourceLanguage: result.sourceLanguage,
-        translatedVideoUrl: selectedVideo.url // Using original video with new audio overlay
+        transcription: result.transcription,
+        translation: result.translation,
+        translatedVideoUrl: selectedVideo.url
       } : null);
 
       toast({
