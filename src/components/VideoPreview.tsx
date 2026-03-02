@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { TranslationJob } from '@/types/video';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { SubtitleDisplay } from './SubtitleDisplay';
 
 interface VideoPreviewProps {
   job: TranslationJob;
@@ -17,6 +18,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, transl
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
 
   // Sync audio with video
   useEffect(() => {
@@ -54,8 +56,9 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, transl
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      const progress = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-      setProgress(progress);
+      const prog = (videoRef.current.currentTime / videoRef.current.duration) * 100;
+      setProgress(prog);
+      setCurrentTime(videoRef.current.currentTime);
       
       // Keep audio in sync
       if (audioRef.current && translatedAudioUrl) {
@@ -277,6 +280,15 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ job, onReset, transl
           </div>
         </div>
       </div>
+
+      {/* Subtitles */}
+      {job.translation && (
+        <SubtitleDisplay
+          transcript={job.translation}
+          currentTime={currentTime}
+          targetLanguage={job.targetLanguage.code}
+        />
+      )}
 
       {/* Translation info */}
       <div className="mt-4 p-4 rounded-xl glass">

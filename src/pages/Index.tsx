@@ -1,13 +1,15 @@
 import React from 'react';
 import { Header } from '@/components/Header';
 import { VideoUploader } from '@/components/VideoUploader';
+import { YouTubeImport } from '@/components/YouTubeImport';
 import { LanguageSelector } from '@/components/LanguageSelector';
 import { VoiceCloningToggle } from '@/components/VoiceCloningToggle';
 import { ProcessingScreen } from '@/components/ProcessingScreen';
 import { VideoPreview } from '@/components/VideoPreview';
 import { Button } from '@/components/ui/button';
 import { useVideoTranslation } from '@/hooks/useVideoTranslation';
-import { Wand2 } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { Wand2, LogOut } from 'lucide-react';
 
 const Index = () => {
   const {
@@ -23,23 +25,33 @@ const Index = () => {
     startTranslation,
     reset,
   } = useVideoTranslation();
+  const { user, signOut } = useAuth();
 
   const isProcessing = job && job.status !== 'complete' && job.status !== 'error';
   const isComplete = job?.status === 'complete';
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Background glow effect */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 gradient-glow opacity-50" />
       </div>
 
       <Header />
 
-      <main className="relative z-10 pt-20 pb-8 px-4 max-w-lg mx-auto">
+      {/* User info bar */}
+      <div className="relative z-10 pt-16 px-4 max-w-lg mx-auto">
+        <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
+          <span>{user?.email}</span>
+          <Button variant="ghost" size="sm" onClick={signOut} className="text-xs h-7">
+            <LogOut className="w-3 h-3 mr-1" />
+            Sign out
+          </Button>
+        </div>
+      </div>
+
+      <main className="relative z-10 pb-8 px-4 max-w-lg mx-auto">
         {!job && (
           <>
-            {/* Hero section when no video */}
             {!selectedVideo && (
               <div className="text-center mb-8 animate-fade-in">
                 <h2 className="text-2xl font-bold text-foreground mb-2">
@@ -51,8 +63,7 @@ const Index = () => {
               </div>
             )}
 
-            {/* Video uploader */}
-            <div className="mb-6">
+            <div className="mb-4">
               <VideoUploader
                 onVideoSelect={selectVideo}
                 selectedVideo={selectedVideo}
@@ -60,7 +71,13 @@ const Index = () => {
               />
             </div>
 
-            {/* Settings (only show when video selected) */}
+            {/* YouTube import */}
+            {!selectedVideo && (
+              <div className="mb-6">
+                <YouTubeImport onVideoReady={selectVideo} />
+              </div>
+            )}
+
             {selectedVideo && (
               <div className="space-y-6 mb-8">
                 <LanguageSelector
@@ -88,17 +105,14 @@ const Index = () => {
           </>
         )}
 
-        {/* Processing screen */}
         {isProcessing && (
           <ProcessingScreen job={job} steps={processingSteps} />
         )}
 
-        {/* Preview screen */}
         {isComplete && job && (
           <VideoPreview job={job} onReset={reset} translatedAudioUrl={translatedAudio} />
         )}
 
-        {/* Error state */}
         {job?.status === 'error' && (
           <div className="text-center py-8 animate-fade-in">
             <p className="text-destructive mb-4">{job.error}</p>
