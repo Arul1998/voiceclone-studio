@@ -9,129 +9,34 @@ export interface TranslationResult {
   translation?: string;
   audioBase64?: string;
   audioFormat?: string;
+  speakersDetected?: number | string;
   error?: string;
 }
 
-// Extract audio from video file as base64
-export const extractAudioFromVideo = async (videoFile: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.src = URL.createObjectURL(videoFile);
-    video.muted = true;
-    
-    video.onloadedmetadata = async () => {
-      try {
-        const audioContext = new AudioContext();
-        const response = await fetch(video.src);
-        const arrayBuffer = await response.arrayBuffer();
-        
-        // For now, we'll send the video file directly as it may contain audio
-        // The backend will handle audio extraction
-        const base64 = btoa(
-          new Uint8Array(arrayBuffer).reduce(
-            (data, byte) => data + String.fromCharCode(byte),
-            ''
-          )
-        );
-        
-        URL.revokeObjectURL(video.src);
-        resolve(base64);
-      } catch (error) {
-        URL.revokeObjectURL(video.src);
-        reject(error);
-      }
-    };
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
-      reject(new Error('Failed to load video'));
-    };
-  });
+// Upload video to Storage and return the path
+const uploadVideoToStorage = async (file: File): Promise<string> => {
+  const fileExt = file.name.split('.').pop() || 'mp4';
+  const filePath = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+
+  const { error } = await supabase.storage
+    .from('videos')
+    .upload(filePath, file, {
+      contentType: file.type || 'video/mp4',
+      upsert: false,
+    });
+
+  if (error) {
+    throw new Error(`Upload failed: ${error.message}`);
+  }
+
+  return filePath;
 };
 
-// Alternative: Use Web Audio API to extract audio
-export const extractAudioAsWav = async (videoFile: File): Promise<string> => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const arrayBuffer = await videoFile.arrayBuffer();
-      
-      // Try to decode audio from the video file
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      
-      // Convert to WAV format
-      const wavBuffer = audioBufferToWav(audioBuffer);
-      const base64 = btoa(
-        new Uint8Array(wavBuffer).reduce(
-          (data, byte) => data + String.fromCharCode(byte),
-          ''
-        )
-      );
-      
-      resolve(base64);
-    } catch (error) {
-      console.error('Audio extraction error:', error);
-      reject(error);
-    }
-  });
-};
-
-// Convert AudioBuffer to WAV format
-function audioBufferToWav(audioBuffer: AudioBuffer): ArrayBuffer {
-  const numChannels = 1; // Mono
-  const sampleRate = audioBuffer.sampleRate;
-  const format = 1; // PCM
-  const bitDepth = 16;
-  
-  const data = audioBuffer.getChannelData(0);
-  const buffer = new ArrayBuffer(44 + data.length * 2);
-  const view = new DataView(buffer);
-  
-  // WAV header
-  writeString(view, 0, 'RIFF');
-  view.setUint32(4, 36 + data.length * 2, true);
-  writeString(view, 8, 'WAVE');
-  writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, format, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * numChannels * bitDepth / 8, true);
-  view.setUint16(32, numChannels * bitDepth / 8, true);
-  view.setUint16(34, bitDepth, true);
-  writeString(view, 36, 'data');
-  view.setUint32(40, data.length * 2, true);
-  
-  // Write audio data
-  let offset = 44;
-  for (let i = 0; i < data.length; i++) {
-    const sample = Math.max(-1, Math.min(1, data[i]));
-    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
-    offset += 2;
-  }
-  
-  return buffer;
-}
-
-function writeString(view: DataView, offset: number, string: string) {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i));
-  }
-}
-
-// Convert file to base64
-const fileToBase64 = async (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Remove data URL prefix (e.g., "data:video/mp4;base64,")
-      const base64 = result.split(',')[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+// Clean up uploaded file from Storage
+const deleteVideoFromStorage = async (filePath: string): Promise<void> => {
+  await supabase.storage.from('videos').remove([filePath]);
 };
 
 // Main translation function
@@ -141,20 +46,27 @@ export const translateVideo = async (
   voiceCloning: boolean,
   onProgress: (step: string, progress: number) => void
 ): Promise<TranslationResult> => {
+  if (videoFile.size > MAX_FILE_SIZE) {
+    return {
+      success: false,
+      error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB.`,
+    };
+  }
+
+  let storagePath: string | null = null;
+
   try {
-    onProgress('extracting', 10);
-    
-    // Send the original video file directly for better sync and quality
-    const videoBase64 = await fileToBase64(videoFile);
-    const mimeType = videoFile.type || 'video/mp4';
-    
+    // Step 1: Upload video to Storage
+    onProgress('uploading', 10);
+    storagePath = await uploadVideoToStorage(videoFile);
+
     onProgress('processing', 30);
-    
-    // Call the edge function with the full video
+
+    // Step 2: Call the edge function with the storage path
     const { data, error } = await supabase.functions.invoke('translate-video', {
       body: {
-        videoBase64,
-        mimeType,
+        storagePath,
+        mimeType: videoFile.type || 'video/mp4',
         targetLanguage: targetLanguage.name,
         voiceCloning
       }
@@ -173,7 +85,7 @@ export const translateVideo = async (
 
     // Map the source language code to our language list
     const sourceLanguage = languages.find(
-      l => l.code === data.sourceLanguage?.code || 
+      l => l.code === data.sourceLanguage?.code ||
            l.name.toLowerCase() === data.sourceLanguage?.name?.toLowerCase()
     ) || {
       code: data.sourceLanguage?.code || 'unknown',
@@ -187,15 +99,21 @@ export const translateVideo = async (
       transcription: data.transcription,
       translation: data.translation,
       audioBase64: data.audioBase64,
-      audioFormat: data.audioFormat
+      audioFormat: data.audioFormat,
+      speakersDetected: data.speakersDetected,
     };
-    
+
   } catch (error) {
     console.error('Translation error:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Translation failed'
     };
+  } finally {
+    // Clean up storage
+    if (storagePath) {
+      deleteVideoFromStorage(storagePath).catch(console.error);
+    }
   }
 };
 

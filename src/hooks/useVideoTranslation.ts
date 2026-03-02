@@ -16,11 +16,11 @@ export const useVideoTranslation = () => {
   const [translatedAudio, setTranslatedAudio] = useState<string | null>(null);
 
   const initializeSteps = (): ProcessingStep[] => [
-    { id: 'extract', label: 'Extracting audio', status: 'pending' },
-    { id: 'transcribe', label: 'Transcribing speech', status: 'pending' },
-    { id: 'detect', label: 'Detecting language', status: 'pending' },
-    { id: 'translate', label: 'Translating content', status: 'pending' },
-    { id: 'synthesize', label: 'Generating voice', status: 'pending' },
+    { id: 'upload', label: 'Uploading video', status: 'pending' },
+    { id: 'detect', label: 'Detecting speakers', status: 'pending' },
+    { id: 'translate', label: 'Translating & dubbing', status: 'pending' },
+    { id: 'synthesize', label: 'Cloning voices', status: 'pending' },
+    { id: 'download', label: 'Downloading result', status: 'pending' },
   ];
 
   const updateStep = (stepId: string, status: ProcessingStep['status']) => {
@@ -69,35 +69,32 @@ export const useVideoTranslation = () => {
     setJob(newJob);
 
     try {
-      // Step 1: Extract audio
-      updateStep('extract', 'active');
-      setJob(prev => prev ? { ...prev, progress: 10, status: 'detecting' } : null);
-      
-      // Small delay to show the step
-      await new Promise(resolve => setTimeout(resolve, 500));
-      updateStep('extract', 'complete');
-      
-      // Step 2: Transcribe
-      updateStep('transcribe', 'active');
-      setJob(prev => prev ? { ...prev, progress: 20, status: 'transcribing' } : null);
-
-      // Step 3-5 happen in the edge function
       const result = await translateVideo(
         videoFile,
         targetLanguage,
         voiceCloning,
         (step, progress) => {
-          if (step === 'extracting') {
-            updateStep('transcribe', 'active');
-            setJob(prev => prev ? { ...prev, progress: 30 } : null);
+          if (step === 'uploading') {
+            updateStep('upload', 'active');
+            setJob(prev => prev ? { ...prev, progress: 10, status: 'detecting' } : null);
           } else if (step === 'processing') {
-            updateStep('transcribe', 'complete');
-            updateStep('detect', 'complete');
-            updateStep('translate', 'active');
-            setJob(prev => prev ? { ...prev, progress: 60, status: 'translating' } : null);
+            updateStep('upload', 'complete');
+            updateStep('detect', 'active');
+            setJob(prev => prev ? { ...prev, progress: 30, status: 'transcribing' } : null);
+            // Simulate progress through the long dubbing step
+            setTimeout(() => {
+              updateStep('detect', 'complete');
+              updateStep('translate', 'active');
+              setJob(prev => prev ? { ...prev, progress: 50, status: 'translating' } : null);
+            }, 5000);
+            setTimeout(() => {
+              updateStep('translate', 'complete');
+              updateStep('synthesize', 'active');
+              setJob(prev => prev ? { ...prev, progress: 70, status: 'cloning' } : null);
+            }, 15000);
           } else if (step === 'complete') {
-            updateStep('translate', 'complete');
             updateStep('synthesize', 'complete');
+            updateStep('download', 'complete');
           }
         }
       );
@@ -106,11 +103,8 @@ export const useVideoTranslation = () => {
         throw new Error(result.error || 'Translation failed');
       }
 
-      // Update steps to complete
-      updateStep('transcribe', 'complete');
-      updateStep('detect', 'complete');
-      updateStep('translate', 'complete');
-      updateStep('synthesize', 'complete');
+      // Update all steps to complete
+      ['upload', 'detect', 'translate', 'synthesize', 'download'].forEach(s => updateStep(s, 'complete'));
 
       // Store the translated audio
       if (result.audioBase64) {

@@ -18,20 +18,27 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  const MAX_SIZE = 50 * 1024 * 1024; // 50MB
+
+  const validateAndSelect = (file: File) => {
+    if (!file.type.startsWith('video/')) return;
+    if (file.size > MAX_SIZE) {
+      alert(`File too large. Maximum size is ${MAX_SIZE / (1024 * 1024)}MB.`);
+      return;
+    }
+    onVideoSelect(file);
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && file.type.startsWith('video/')) {
-      onVideoSelect(file);
-    }
+    if (file) validateAndSelect(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file && file.type.startsWith('video/')) {
-      onVideoSelect(file);
-    }
+    if (file) validateAndSelect(file);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -131,7 +138,7 @@ export const VideoUploader: React.FC<VideoUploaderProps> = ({
           Select a video
         </h3>
         <p className="text-muted-foreground text-sm text-center mb-6 max-w-[250px]">
-          Drag and drop or tap to browse your device
+          Drag and drop or tap to browse your device (max 50MB)
         </p>
         
         <Button
