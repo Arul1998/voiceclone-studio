@@ -1,41 +1,152 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.86.0";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Language code mapping for ElevenLabs dubbing API
 const languageCodeMap: Record<string, string> = {
-  'Tamil': 'ta',
-  'Hindi': 'hi',
-  'Telugu': 'te',
-  'Kannada': 'kn',
-  'Malayalam': 'ml',
-  'Bengali': 'bn',
-  'Marathi': 'mr',
-  'Gujarati': 'gu',
-  'Punjabi': 'pa',
-  'Odia': 'or',
-  'Assamese': 'as',
-  'Urdu': 'ur',
-  'Sanskrit': 'sa',
-  'Konkani': 'kok',
-  'Nepali': 'ne',
-  'Sindhi': 'sd',
-  'English': 'en',
-  'Spanish': 'es',
-  'French': 'fr',
-  'German': 'de',
-  'Italian': 'it',
-  'Portuguese': 'pt',
-  'Russian': 'ru',
-  'Japanese': 'ja',
-  'Korean': 'ko',
-  'Chinese': 'zh',
-  'Arabic': 'ar',
+  'Tamil': 'ta', 'Hindi': 'hi', 'Telugu': 'te', 'Kannada': 'kn',
+  'Malayalam': 'ml', 'Bengali': 'bn', 'Marathi': 'mr', 'Gujarati': 'gu',
+  'Punjabi': 'pa', 'Odia': 'or', 'Assamese': 'as', 'Urdu': 'ur',
+  'Sanskrit': 'sa', 'Konkani': 'kok', 'Nepali': 'ne', 'Sindhi': 'sd',
+  'English': 'en', 'Spanish': 'es', 'French': 'fr', 'German': 'de',
+  'Italian': 'it', 'Portuguese': 'pt', 'Russian': 'ru', 'Japanese': 'ja',
+  'Korean': 'ko', 'Chinese': 'zh', 'Arabic': 'ar',
 };
+
+// Download video from Supabase Storage
+async function downloadFromStorage(storagePath: string): Promise<Uint8Array> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  const { data, error } = await supabase.storage
+    .from('videos')
+    .download(storagePath);
+
+  if (error || !data) {
+    throw new Error(`Storage download failed: ${error?.message || 'No data'}`);
+  }
+
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+// Create dubbing project with ElevenLabs
+async function createDubbingProject(
+  videoBytes: Uint8Array,
+  mimeType: string,
+  targetLangCode: string
+): Promise<string> {
+  const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')!;
+
+  const extMap: Record<string, string> = {
+    'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+    'video/x-msvideo': 'avi', 'video/x-matroska': 'mkv',
+  };
+  const ext = extMap[mimeType] || 'mp4';
+
+  const formData = new FormData();
+  const videoBlob = new Blob([videoBytes], { type: mimeType || 'video/mp4' });
+  formData.append('file', videoBlob, `video.${ext}`);
+  formData.append('target_lang', targetLangCode);
+  formData.append('mode', 'automatic');
+  formData.append('num_speakers', '0');
+  formData.append('watermark', 'false');
+  formData.append('highest_resolution', 'true');
+
+  const response = await fetch('https://api.elevenlabs.io/v1/dubbing', {
+    method: 'POST',
+    headers: { 'xi-api-key': ELEVENLABS_API_KEY },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Dubbing creation failed: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return data.dubbing_id;
+}
+
+// Poll for dubbing completion
+async function pollDubbingStatus(dubbingId: string): Promise<any> {
+  const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')!;
+  const maxAttempts = 120; // 10 minutes max
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/dubbing/${dubbingId}`,
+      { headers: { 'xi-api-key': ELEVENLABS_API_KEY } }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Status check failed: ${errorText}`);
+    }
+
+    const status = await response.json();
+    console.log(`Dubbing status: ${status.status} (attempt ${attempt + 1})`);
+
+    if (status.status === 'dubbed') return status;
+    if (status.status === 'failed') {
+      throw new Error(`Dubbing failed: ${status.error || 'Unknown error'}`);
+    }
+  }
+
+  throw new Error('Dubbing timed out after 10 minutes');
+}
+
+// Download dubbed audio
+async function downloadDubbedAudio(dubbingId: string, langCode: string): Promise<Uint8Array> {
+  const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')!;
+
+  const response = await fetch(
+    `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/audio/${langCode}`,
+    { headers: { 'xi-api-key': ELEVENLABS_API_KEY } }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Audio download failed: ${errorText}`);
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+// Fetch transcript (optional, won't throw)
+async function fetchTranscript(dubbingId: string, langCode: string): Promise<string> {
+  const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY')!;
+  try {
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/transcript/${langCode}`,
+      { headers: { 'xi-api-key': ELEVENLABS_API_KEY } }
+    );
+    if (response.ok) {
+      const data = await response.json();
+      return data.transcript || '';
+    }
+  } catch (e) {
+    console.log('Could not fetch transcript:', e);
+  }
+  return '';
+}
+
+// Convert Uint8Array to base64 safely (chunked)
+function uint8ArrayToBase64(uint8Array: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8Array.length; i += chunkSize) {
+    const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -43,224 +154,69 @@ serve(async (req) => {
   }
 
   try {
-    const { videoBase64, mimeType, targetLanguage, voiceCloning } = await req.json();
-    
-    if (!videoBase64) {
-      throw new Error('No video data provided');
+    const { storagePath, mimeType, targetLanguage, voiceCloning } = await req.json();
+
+    if (!storagePath) {
+      throw new Error('No video storage path provided');
     }
 
     const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
-
     if (!ELEVENLABS_API_KEY) {
       throw new Error('ELEVENLABS_API_KEY is not configured');
     }
 
-    console.log('Starting multi-speaker video translation...');
-    console.log('Target language:', targetLanguage);
-    console.log('Voice cloning enabled:', voiceCloning);
-    console.log('Video MIME type:', mimeType);
-
-    // Convert base64 video to binary
-    const binaryString = atob(videoBase64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    
-    console.log('Video size:', bytes.length, 'bytes');
-
     const targetLangCode = languageCodeMap[targetLanguage] || 'en';
-    console.log('Target language code:', targetLangCode);
+    console.log(`Starting dubbing: ${targetLanguage} (${targetLangCode}), voice cloning: ${voiceCloning}`);
 
-    // Determine file extension from mime type
-    const extMap: Record<string, string> = {
-      'video/mp4': 'mp4',
-      'video/webm': 'webm',
-      'video/quicktime': 'mov',
-      'video/x-msvideo': 'avi',
-      'video/x-matroska': 'mkv',
-    };
-    const ext = extMap[mimeType] || 'mp4';
+    // Step 1: Download video from Storage
+    console.log('Downloading video from storage...');
+    const videoBytes = await downloadFromStorage(storagePath);
+    console.log(`Video size: ${videoBytes.length} bytes`);
 
-    // Use ElevenLabs Dubbing API with original video for best sync
-    console.log('Step 1: Creating dubbing project with ElevenLabs...');
-    
-    const formData = new FormData();
-    const videoBlob = new Blob([bytes], { type: mimeType || 'video/mp4' });
-    formData.append('file', videoBlob, `video.${ext}`);
-    formData.append('target_lang', targetLangCode);
-    formData.append('mode', 'automatic'); // Automatic speaker detection
-    formData.append('num_speakers', '0'); // Auto-detect number of speakers
-    formData.append('watermark', 'false');
-    formData.append('highest_resolution', 'true'); // Better quality
+    // Step 2: Create dubbing project
+    console.log('Creating dubbing project...');
+    const dubbingId = await createDubbingProject(videoBytes, mimeType, targetLangCode);
+    console.log(`Dubbing ID: ${dubbingId}`);
 
-    const dubbingResponse = await fetch('https://api.elevenlabs.io/v1/dubbing', {
-      method: 'POST',
-      headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
-      },
-      body: formData,
-    });
+    // Step 3: Poll for completion
+    console.log('Waiting for dubbing...');
+    const dubbingStatus = await pollDubbingStatus(dubbingId);
+    console.log(`Dubbing complete. Speakers: ${dubbingStatus.num_speakers || 'unknown'}`);
 
-    if (!dubbingResponse.ok) {
-      const errorText = await dubbingResponse.text();
-      console.error('Dubbing creation error:', errorText);
-      throw new Error(`Dubbing creation failed: ${errorText}`);
-    }
+    // Step 4: Download dubbed audio
+    console.log('Downloading dubbed audio...');
+    const audioBytes = await downloadDubbedAudio(dubbingId, targetLangCode);
+    const audioBase64 = uint8ArrayToBase64(audioBytes);
+    console.log(`Audio size: ${audioBytes.length} bytes`);
 
-    const dubbingData = await dubbingResponse.json();
-    const dubbingId = dubbingData.dubbing_id;
-    console.log('Dubbing project created, ID:', dubbingId);
-
-    // Step 2: Poll for dubbing completion
-    console.log('Step 2: Waiting for dubbing to complete...');
-    
-    let dubbingComplete = false;
-    let attempts = 0;
-    const maxAttempts = 60; // Max 5 minutes (5 seconds * 60)
-    let dubbingStatus: any = null;
-
-    while (!dubbingComplete && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-      
-      const statusResponse = await fetch(`https://api.elevenlabs.io/v1/dubbing/${dubbingId}`, {
-        method: 'GET',
-        headers: {
-          'xi-api-key': ELEVENLABS_API_KEY,
-        },
-      });
-
-      if (!statusResponse.ok) {
-        const errorText = await statusResponse.text();
-        console.error('Status check error:', errorText);
-        throw new Error(`Status check failed: ${errorText}`);
-      }
-
-      dubbingStatus = await statusResponse.json();
-      console.log('Dubbing status:', dubbingStatus.status, `(attempt ${attempts + 1})`);
-
-      if (dubbingStatus.status === 'dubbed') {
-        dubbingComplete = true;
-      } else if (dubbingStatus.status === 'failed') {
-        throw new Error(`Dubbing failed: ${dubbingStatus.error || 'Unknown error'}`);
-      }
-      
-      attempts++;
-    }
-
-    if (!dubbingComplete) {
-      throw new Error('Dubbing timed out after 5 minutes');
-    }
-
-    // Step 3: Download the dubbed audio
-    console.log('Step 3: Downloading dubbed audio...');
-    
-    const audioDownloadResponse = await fetch(
-      `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/audio/${targetLangCode}`,
-      {
-        method: 'GET',
-        headers: {
-          'xi-api-key': ELEVENLABS_API_KEY,
-        },
-      }
-    );
-
-    if (!audioDownloadResponse.ok) {
-      const errorText = await audioDownloadResponse.text();
-      console.error('Audio download error:', errorText);
-      throw new Error(`Audio download failed: ${errorText}`);
-    }
-
-    const dubbedAudioBuffer = await audioDownloadResponse.arrayBuffer();
-    
-    // Convert to base64 in chunks to avoid stack overflow
-    const uint8Array = new Uint8Array(dubbedAudioBuffer);
-    let binary = '';
-    const chunkSize = 8192;
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
-      binary += String.fromCharCode(...chunk);
-    }
-    const audioBase64Output = btoa(binary);
-    
-    console.log('Multi-speaker dubbing complete. Audio size:', dubbedAudioBuffer.byteLength, 'bytes');
-    console.log('Detected speakers:', dubbingStatus.num_speakers || 'unknown');
-
-    // Get transcription info if available
-    let transcription = '';
-    let translation = '';
-    let sourceLanguage = { code: 'auto', name: 'Auto-detected' };
-
-    if (dubbingStatus.source_lang) {
-      sourceLanguage = {
-        code: dubbingStatus.source_lang,
-        name: dubbingStatus.source_lang
-      };
-    }
-
-    // Try to get transcript
-    try {
-      const transcriptResponse = await fetch(
-        `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/transcript/${dubbingStatus.source_lang || 'en'}`,
-        {
-          method: 'GET',
-          headers: {
-            'xi-api-key': ELEVENLABS_API_KEY,
-          },
-        }
-      );
-      if (transcriptResponse.ok) {
-        const transcriptData = await transcriptResponse.json();
-        transcription = transcriptData.transcript || '';
-      }
-    } catch (e) {
-      console.log('Could not fetch transcript:', e);
-    }
-
-    // Try to get translated transcript
-    try {
-      const translatedTranscriptResponse = await fetch(
-        `https://api.elevenlabs.io/v1/dubbing/${dubbingId}/transcript/${targetLangCode}`,
-        {
-          method: 'GET',
-          headers: {
-            'xi-api-key': ELEVENLABS_API_KEY,
-          },
-        }
-      );
-      if (translatedTranscriptResponse.ok) {
-        const translatedData = await translatedTranscriptResponse.json();
-        translation = translatedData.transcript || '';
-      }
-    } catch (e) {
-      console.log('Could not fetch translated transcript:', e);
-    }
+    // Step 5: Fetch transcripts (non-blocking)
+    const sourceLang = dubbingStatus.source_lang || 'en';
+    const [transcription, translation] = await Promise.all([
+      fetchTranscript(dubbingId, sourceLang),
+      fetchTranscript(dubbingId, targetLangCode),
+    ]);
 
     return new Response(
       JSON.stringify({
         success: true,
-        sourceLanguage,
+        sourceLanguage: { code: sourceLang, name: sourceLang },
         transcription: transcription || 'Multi-speaker audio processed',
         translation: translation || `Dubbed to ${targetLanguage}`,
-        audioBase64: audioBase64Output,
+        audioBase64,
         audioFormat: 'audio/mpeg',
-        speakersDetected: dubbingStatus.num_speakers || 'multiple'
+        speakersDetected: dubbingStatus.num_speakers || 'multiple',
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
   } catch (error) {
-    console.error('Error in translate-video function:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Error in translate-video:', error);
     return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: errorMessage 
+      JSON.stringify({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
       }),
-      { 
-        status: 500, 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
-      }
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
