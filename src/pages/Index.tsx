@@ -9,7 +9,8 @@ import { VideoPreview } from '@/components/VideoPreview';
 import { Button } from '@/components/ui/button';
 import { useVideoTranslation } from '@/hooks/useVideoTranslation';
 import { useAuth } from '@/contexts/AuthContext';
-import { Wand2, LogOut } from 'lucide-react';
+import { Wand2, LogOut, History } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const Index = () => {
   const {
@@ -27,6 +28,8 @@ const Index = () => {
   } = useVideoTranslation();
   const { user, signOut } = useAuth();
 
+  const navigate = useNavigate();
+
   const isProcessing = job && job.status !== 'complete' && job.status !== 'error';
   const isComplete = job?.status === 'complete';
 
@@ -42,10 +45,16 @@ const Index = () => {
       <div className="relative z-10 pt-16 px-4 max-w-lg mx-auto">
         <div className="flex items-center justify-between py-2 text-xs text-muted-foreground">
           <span>{user?.email}</span>
-          <Button variant="ghost" size="sm" onClick={signOut} className="text-xs h-7">
-            <LogOut className="w-3 h-3 mr-1" />
-            Sign out
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/history')} className="text-xs h-7">
+              <History className="w-3 h-3 mr-1" />
+              History
+            </Button>
+            <Button variant="ghost" size="sm" onClick={signOut} className="text-xs h-7">
+              <LogOut className="w-3 h-3 mr-1" />
+              Sign out
+            </Button>
+          </div>
         </div>
       </div>
 
