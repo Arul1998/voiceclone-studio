@@ -18,7 +18,9 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 // Upload video to Storage and return the path
 const uploadVideoToStorage = async (file: File): Promise<string> => {
   const fileExt = file.name.split('.').pop() || 'mp4';
-  const filePath = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Sign in required');
+  const filePath = `${user.id}/uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`;
 
   const { error } = await supabase.storage
     .from('videos')
