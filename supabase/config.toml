@@ -30,7 +30,7 @@ double_confirm_changes = true
 enable_confirmations = false
 
 [functions.translate-video]
-verify_jwt = false
+verify_jwt = true
 
 [functions.youtube-download]
-verify_jwt = false
+verify_jwt = true
