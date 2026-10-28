@@ -122,10 +122,11 @@ export const useVideoTranslation = () => {
           const bytes = new Uint8Array(binary.length);
           for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
           const audioBlob = new Blob([bytes], { type: result.audioFormat || 'audio/mpeg' });
-          const audioPath = `audio/${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
+          const { data: { user }, error: authError } = await supabase.auth.getUser();
+          if (authError || !user) throw new Error('Sign in required');
+          const audioPath = `${user.id}/audio/${Date.now()}-${Math.random().toString(36).slice(2)}.mp3`;
           await supabase.storage.from('videos').upload(audioPath, audioBlob);
-          const { data: urlData } = supabase.storage.from('videos').getPublicUrl(audioPath);
-          audioStorageUrl = urlData.publicUrl;
+          audioStorageUrl = audioPath;
         } catch (e) {
           console.warn('Failed to upload audio to storage:', e);
         }
