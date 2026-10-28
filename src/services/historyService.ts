@@ -52,7 +52,7 @@ export const deleteTranslation = async (id: string) => {
     .single() as any;
 
   if (record?.audio_url) {
-    const path = record.audio_url.split('/videos/')[1];
+    const path = record.audio_url.startsWith('http') ? null : record.audio_url;
     if (path) {
       await supabase.storage.from('videos').remove([path]);
     }
