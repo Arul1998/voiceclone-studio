@@ -154,7 +154,19 @@ serve(async (req) => {
   }
 
   try {
+    const authorization = req.headers.get('Authorization');
+    if (!authorization?.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: authorization } } });
+    const { data: { user }, error: userError } = await userClient.auth.getUser();
+    if (userError || !user) return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
     const { storagePath, mimeType, targetLanguage, voiceCloning } = await req.json();
+
+    if (typeof storagePath !== 'string' || !storagePath.startsWith(`${user.id}/uploads/`) || storagePath.includes('..')) {
+      return new Response(JSON.stringify({ error: 'Forbidden storage path' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
 
     if (!storagePath) {
       throw new Error('No video storage path provided');
