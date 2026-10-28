@@ -7,6 +7,7 @@ import { ArrowLeft, Download, Trash2, Clock, Globe, Users, LogOut } from 'lucide
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { supabase } from '@/integrations/supabase/client';
 
 const HistoryPage: React.FC = () => {
   const { user, signOut } = useAuth();
@@ -40,13 +41,17 @@ const HistoryPage: React.FC = () => {
     }
   };
 
-  const handleDownloadAudio = (record: TranslationRecord) => {
+  const handleDownloadAudio = async (record: TranslationRecord) => {
     if (!record.audio_url) {
       toast.error('No audio available');
       return;
     }
+    const path = record.audio_url.startsWith('http') ? null : record.audio_url;
+    if (!path) { toast.error('Legacy audio links require migration'); return; }
+    const { data, error } = await supabase.storage.from('videos').createSignedUrl(path, 60);
+    if (error || !data) { toast.error('Could not access audio'); return; }
     const link = document.createElement('a');
-    link.href = record.audio_url;
+    link.href = data.signedUrl;
     link.download = `translated-${record.target_language}-${record.video_name}.mp3`;
     link.click();
     toast.success('Downloading audio...');
